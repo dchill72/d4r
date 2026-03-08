@@ -30,59 +30,42 @@ func (m Model) footerHints() [][2]string {
 		}
 	}
 
-	// List screen — tab-specific
-	base := [][2]string{
+	// Shared fragments reused across all list-screen branches.
+	nav := [][2]string{
 		{"tab/1-4", "switch"},
 		{"j/k/↑↓", "navigate"},
 		{"r", "refresh"},
+	}
+	tail := [][2]string{
 		{"t", "theme"},
 		{"q", "quit"},
 	}
 
 	switch m.tab {
 	case tabContainers:
-		ct := m.selectedContainer()
-		hints := [][2]string{
-			{"tab/1-4", "switch"},
-			{"j/k/↑↓", "navigate"},
-			{"a", func() string {
-			if m.showAll {
-				return "running only"
-			}
-			return "show all"
-		}()},
-			{"r", "refresh"},
+		aLabel := "show all"
+		if m.showAll {
+			aLabel = "running only"
 		}
-		if ct != nil {
-			hints = append(hints, [2]string{"enter/d", "details"})
-			hints = append(hints, [2]string{"l", "logs"})
+		hints := append(nav, [2]string{"a", aLabel})
+		if ct := m.selectedContainer(); ct != nil {
+			hints = append(hints, [2]string{"enter/d", "details"}, [2]string{"l", "logs"})
 			if ct.State == "running" {
-				hints = append(hints, [2]string{"s", "shell"})
-				hints = append(hints, [2]string{"x", "stop"})
+				hints = append(hints, [2]string{"s", "shell"}, [2]string{"x", "stop"})
 			} else {
 				hints = append(hints, [2]string{"u", "start"})
 			}
 			hints = append(hints, [2]string{"D", "delete"})
 		}
-		hints = append(hints, [2]string{"t", "theme"})
-		hints = append(hints, [2]string{"q", "quit"})
-		return hints
+		return append(hints, tail...)
+
 	case tabVolumes, tabNetworks, tabImages:
-		hasItem := m.selectedIndex() >= 0 && m.selectedIndex() < m.listLen()
-		hints := base
-		if hasItem {
-			hints = [][2]string{
-				{"tab/1-4", "switch"},
-				{"j/k/↑↓", "navigate"},
-				{"r", "refresh"},
-				{"enter/d", "details"},
-				{"D", "delete"},
-				{"t", "theme"},
-				{"q", "quit"},
-			}
+		hints := nav
+		if m.selectedIndex() < m.listLen() {
+			hints = append(hints, [2]string{"enter/d", "details"}, [2]string{"D", "delete"})
 		}
-		return hints
+		return append(hints, tail...)
 	}
 
-	return base
+	return append(nav, tail...)
 }
