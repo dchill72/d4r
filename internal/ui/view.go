@@ -6,6 +6,7 @@ import (
 
 	"d4r/internal/docker"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -14,27 +15,59 @@ func (m Model) View() string {
 		return "Initializing..."
 	}
 
-	// Theme picker is a full-screen overlay; render it on top of the themed UI.
+	base := lipgloss.JoinVertical(lipgloss.Left, m.renderHeader(), m.renderBody(), m.renderFooter())
+
 	if m.themePickerActive {
-		// Render the full UI first so theme colours show in the background.
-		bg := lipgloss.JoinVertical(lipgloss.Left, m.renderHeader(), m.renderBody(), m.renderFooter())
-		picker := m.renderThemePicker()
-		// Overlay the picker box centred over the background.
-		_ = bg // bg is visible through the whitespace of Place
-		return lipgloss.Place(
-			m.width, m.height,
-			lipgloss.Center, lipgloss.Center,
-			picker,
-			lipgloss.WithWhitespaceChars(" "),
-			lipgloss.WithWhitespaceForeground(currentDimMuted),
-		)
+		return overlayCenter(base, m.renderThemePicker(), m.width, m.height)
 	}
 
-	header := m.renderHeader()
-	footer := m.renderFooter()
-	body := m.renderBody()
+	return base
+}
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+// overlayCenter composites fg centred over bg using ANSI-aware slicing,
+// so the background content remains visible around the picker box.
+func overlayCenter(bg, fg string, totalW, totalH int) string {
+	fgW := lipgloss.Width(fg)
+	fgH := lipgloss.Height(fg)
+
+	x := (totalW - fgW) / 2
+	y := (totalH - fgH) / 2
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+
+	bgLines := strings.Split(bg, "\n")
+	fgLines := strings.Split(fg, "\n")
+
+	for i, fgLine := range fgLines {
+		idx := y + i
+		for len(bgLines) <= idx {
+			bgLines = append(bgLines, "")
+		}
+
+		bgLine := bgLines[idx]
+		bgW := lipgloss.Width(bgLine)
+		fgLineW := lipgloss.Width(fgLine)
+
+		// Left slice of background up to x, padded if the line is short.
+		left := ansi.Truncate(bgLine, x, "")
+		if lw := lipgloss.Width(left); lw < x {
+			left += strings.Repeat(" ", x-lw)
+		}
+
+		// Right slice of background after the picker box.
+		right := ""
+		if x+fgLineW < bgW {
+			right = ansi.TruncateLeft(bgLine, x+fgLineW, "")
+		}
+
+		bgLines[idx] = left + fgLine + right
+	}
+
+	return strings.Join(bgLines, "\n")
 }
 
 func (m Model) renderThemePicker() string {

@@ -1,6 +1,6 @@
 # d4r
 
-A terminal UI for Docker. Manage containers, volumes, networks, and images without leaving your keyboard.
+A terminal UI for Docker. Manage containers, volumes, networks, and images.
 
 ![containers](./img/d4r-containers.png)
 
