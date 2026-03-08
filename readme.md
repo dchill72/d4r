@@ -2,6 +2,8 @@
 
 A terminal UI for Docker. Manage containers, volumes, networks, and images without leaving your keyboard.
 
+![containers](./img/d4r-containers.png)
+
 ## Features
 
 **Containers**
