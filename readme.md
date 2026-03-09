@@ -118,14 +118,14 @@ Available theme values: `charm`, `dracula`, `tokyo-night`, `base16`, `catppuccin
 | `r` | Restore volume from a `.tar.gz` file |
 | `D` | Delete (confirmation required) |
 
-**Backup** prompts for a destination path (relative to the current working directory), defaulting to `<volume-name>-<timestamp>.tar.gz`. If any containers using the volume are running, you are asked to confirm stopping them; they are restarted automatically once the backup completes. The archive is created by a temporary `alpine` container with the volume mounted read-only.
+**Backup** prompts for a destination path (relative to the current working directory), defaulting to `<volume-name>-<timestamp>.tar.gz`. If any containers using the volume are running, you are asked to confirm stopping them; they are restarted automatically once the backup completes. The archive is created by a temporary `alpine` container with the volume mounted read-only. [Example](./img/d4r-volume-backup.png)
 
 **Restore** prompts for a source archive path. Before proceeding, d4r lists the archive contents and asks you to confirm. You then choose the restore mode:
 
 - **merge** — extracts the archive on top of existing volume contents, leaving unrelated files in place
 - **replace** — clears the volume entirely before extracting
 
-As with backup, any running containers that use the volume are stopped for the duration and restarted afterwards.
+As with backup, any running containers that use the volume are stopped for the duration and restarted afterwards. [Example](./img/d4r-volume-restore.png)
 
 ### Networks, Images
 
