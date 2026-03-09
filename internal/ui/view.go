@@ -21,6 +21,10 @@ func (m Model) View() string {
 		return overlayCenter(base, m.renderThemePicker(), m.width, m.height)
 	}
 
+	if m.loading && !m.initialLoadDone && m.screen == screenList {
+		return overlayCenter(base, m.renderLoadingModal(), m.width, m.height)
+	}
+
 	if m.contextModalActive {
 		return overlayCenter(base, m.renderContextModal(), m.width, m.height)
 	}
@@ -163,6 +167,14 @@ func (m Model) renderThemePicker() string {
 		hints,
 	)
 
+	return stylePickerBorder.Render(content)
+}
+
+func (m Model) renderLoadingModal() string {
+	title := stylePickerTitle.Render("Loading")
+	body := stylePickerOption.Render(m.spinner.View() + " Loading Docker resources...")
+	hints := stylePickerHint.Render("Please wait")
+	content := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hints)
 	return stylePickerBorder.Render(content)
 }
 

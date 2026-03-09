@@ -92,9 +92,10 @@ type Model struct {
 	imageSelected int
 
 	// Shared state
-	loading bool
-	err     error
-	confirm confirmState
+	loading         bool
+	initialLoadDone bool
+	err             error
+	confirm         confirmState
 
 	// Theme picker
 	themePickerActive  bool
@@ -132,11 +133,12 @@ func NewModel(client *docker.Client, theme string) Model {
 		currentTheme: theme,
 		showAll:      true,
 		spinner:      sp,
+		loading:      true,
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return fetchAll(m.docker, m.showAll)
+	return tea.Batch(fetchAll(m.docker, m.showAll), m.spinner.Tick)
 }
 
 // Convenience helpers

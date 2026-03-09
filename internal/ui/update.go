@@ -131,6 +131,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case msgAllLoaded:
 		m.loading = false
+		m.initialLoadDone = true
 		m.containers = msg.containers
 		m.volumes = msg.volumes
 		m.networks = msg.networks
@@ -191,6 +192,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case msgErr:
 		m.loading = false
+		m.initialLoadDone = true
 		m.err = msg.err
 		return m, nil
 
@@ -236,7 +238,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.proceedWithOperation()
 
 	case spinner.TickMsg:
-		if m.spinnerLabel != "" {
+		if m.spinnerLabel != "" || (m.loading && !m.initialLoadDone) {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
