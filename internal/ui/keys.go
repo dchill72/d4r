@@ -34,7 +34,7 @@ func (m Model) footerHints() [][2]string {
 	nav := [][2]string{
 		{"tab/1-4", "switch"},
 		{"j/k/↑↓", "navigate"},
-		{"r", "refresh"},
+		{"F5", "refresh"},
 	}
 	tail := [][2]string{
 		{"t", "theme"},
@@ -59,7 +59,19 @@ func (m Model) footerHints() [][2]string {
 		}
 		return append(hints, tail...)
 
-	case tabVolumes, tabNetworks, tabImages:
+	case tabVolumes:
+		hints := nav
+		if m.selectedIndex() < m.listLen() {
+			hints = append(hints,
+				[2]string{"enter/d", "details"},
+				[2]string{"b", "backup"},
+				[2]string{"r", "restore"},
+				[2]string{"D", "delete"},
+			)
+		}
+		return append(hints, tail...)
+
+	case tabNetworks, tabImages:
 		hints := nav
 		if m.selectedIndex() < m.listLen() {
 			hints = append(hints, [2]string{"enter/d", "details"}, [2]string{"D", "delete"})

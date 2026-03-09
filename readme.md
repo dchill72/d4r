@@ -17,6 +17,8 @@ A terminal UI for Docker. Manage containers, volumes, networks, and images.
 - List volumes with size and reference count
 - View inspect details
 - Delete (with confirmation)
+- Backup to a `.tar.gz` archive
+- Restore from a `.tar.gz` archive
 
 **Networks**
 - List networks with subnet/gateway info
@@ -91,7 +93,7 @@ Available theme values: `charm`, `dracula`, `tokyo-night`, `base16`, `catppuccin
 | `Tab` / `Shift+Tab` | Cycle between tabs |
 | `1` `2` `3` `4` | Jump to Containers / Volumes / Networks / Images |
 | `j` / `k` / `↑` / `↓` | Navigate list |
-| `r` | Refresh |
+| `F5` | Refresh |
 | `t` | Open theme picker |
 | `q` / `Ctrl+C` | Quit |
 
@@ -107,7 +109,25 @@ Available theme values: `charm`, `dracula`, `tokyo-night`, `base16`, `catppuccin
 | `u` | Start / unpause container |
 | `D` | Delete container (confirmation required) |
 
-### Volumes, Networks, Images
+### Volumes
+
+| Key | Action |
+|-----|--------|
+| `Enter` / `d` | View details |
+| `b` | Backup volume to a `.tar.gz` file |
+| `r` | Restore volume from a `.tar.gz` file |
+| `D` | Delete (confirmation required) |
+
+**Backup** prompts for a destination path (relative to the current working directory), defaulting to `<volume-name>-<timestamp>.tar.gz`. If any containers using the volume are running, you are asked to confirm stopping them; they are restarted automatically once the backup completes. The archive is created by a temporary `alpine` container with the volume mounted read-only.
+
+**Restore** prompts for a source archive path. Before proceeding, d4r lists the archive contents and asks you to confirm. You then choose the restore mode:
+
+- **merge** — extracts the archive on top of existing volume contents, leaving unrelated files in place
+- **replace** — clears the volume entirely before extracting
+
+As with backup, any running containers that use the volume are stopped for the duration and restarted afterwards.
+
+### Networks, Images
 
 | Key | Action |
 |-----|--------|

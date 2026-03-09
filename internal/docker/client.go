@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -204,6 +206,145 @@ func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
 		out = append(out, vol)
 	}
 	return out, nil
+}
+
+func (c *Client) GetContainersForVolume(ctx context.Context, volumeName string) ([]Container, error) {
+	list, err := c.cli.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return nil, err
+	}
+	var out []Container
+	for _, ct := range list {
+		for _, m := range ct.Mounts {
+			if m.Name == volumeName {
+				name := ""
+				if len(ct.Names) > 0 {
+					name = strings.TrimPrefix(ct.Names[0], "/")
+				}
+				out = append(out, Container{
+					ID:     shortID(ct.ID),
+					FullID: ct.ID,
+					Name:   name,
+					Image:  ct.Image,
+					Status: ct.Status,
+					State:  ct.State,
+				})
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+func (c *Client) BackupVolume(ctx context.Context, volumeName, destPath string) error {
+	absDestPath, err := filepath.Abs(destPath)
+	if err != nil {
+		return fmt.Errorf("resolving destination path: %w", err)
+	}
+	destDir := filepath.Dir(absDestPath)
+	destFile := filepath.Base(absDestPath)
+
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return fmt.Errorf("creating destination directory: %w", err)
+	}
+
+	// Pull alpine (best-effort; if offline, use whatever is cached locally).
+	if rc, pullErr := c.cli.ImagePull(ctx, "alpine", imgtype.PullOptions{}); pullErr == nil {
+		io.Copy(io.Discard, rc)
+		rc.Close()
+	}
+
+	resp, err := c.cli.ContainerCreate(ctx,
+		&container.Config{
+			Image: "alpine",
+			Cmd:   []string{"tar", "czf", "/backup_dest/" + destFile, "-C", "/backup_source", "."},
+		},
+		&container.HostConfig{
+			Binds: []string{
+				volumeName + ":/backup_source:ro",
+				destDir + ":/backup_dest",
+			},
+		},
+		nil, nil, "")
+	if err != nil {
+		return fmt.Errorf("creating backup container: %w", err)
+	}
+	defer c.cli.ContainerRemove(context.Background(), resp.ID, container.RemoveOptions{Force: true})
+
+	if err := c.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("starting backup container: %w", err)
+	}
+
+	statusCh, errCh := c.cli.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return fmt.Errorf("waiting for backup container: %w", err)
+		}
+	case status := <-statusCh:
+		if status.StatusCode != 0 {
+			return fmt.Errorf("backup container exited with code %d", status.StatusCode)
+		}
+	}
+	return nil
+}
+
+func (c *Client) RestoreVolume(ctx context.Context, volumeName, sourcePath string, replace bool) error {
+	absSrcPath, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return fmt.Errorf("resolving source path: %w", err)
+	}
+	srcDir := filepath.Dir(absSrcPath)
+	srcFile := filepath.Base(absSrcPath)
+
+	// Pull alpine (best-effort).
+	if rc, pullErr := c.cli.ImagePull(ctx, "alpine", imgtype.PullOptions{}); pullErr == nil {
+		io.Copy(io.Discard, rc)
+		rc.Close()
+	}
+
+	var cmd []string
+	if replace {
+		cmd = []string{"sh", "-c",
+			"find /restore_dest -mindepth 1 -delete && tar xzf /restore_source/" + srcFile + " -C /restore_dest",
+		}
+	} else {
+		cmd = []string{"tar", "xzf", "/restore_source/" + srcFile, "-C", "/restore_dest"}
+	}
+
+	resp, err := c.cli.ContainerCreate(ctx,
+		&container.Config{
+			Image: "alpine",
+			Cmd:   cmd,
+		},
+		&container.HostConfig{
+			Binds: []string{
+				volumeName + ":/restore_dest",
+				srcDir + ":/restore_source:ro",
+			},
+		},
+		nil, nil, "")
+	if err != nil {
+		return fmt.Errorf("creating restore container: %w", err)
+	}
+	defer c.cli.ContainerRemove(context.Background(), resp.ID, container.RemoveOptions{Force: true})
+
+	if err := c.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("starting restore container: %w", err)
+	}
+
+	statusCh, errCh := c.cli.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return fmt.Errorf("waiting for restore container: %w", err)
+		}
+	case status := <-statusCh:
+		if status.StatusCode != 0 {
+			return fmt.Errorf("restore container exited with code %d", status.StatusCode)
+		}
+	}
+	return nil
 }
 
 func (c *Client) RemoveVolume(ctx context.Context, name string, force bool) error {

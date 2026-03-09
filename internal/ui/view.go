@@ -6,8 +6,8 @@ import (
 
 	"d4r/internal/docker"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func (m Model) View() string {
@@ -21,7 +21,69 @@ func (m Model) View() string {
 		return overlayCenter(base, m.renderThemePicker(), m.width, m.height)
 	}
 
+	if m.wizard.op != wizardOpNone {
+		return overlayCenter(base, m.renderVolumeWizard(), m.width, m.height)
+	}
+
 	return base
+}
+
+func (m Model) renderVolumeWizard() string {
+	opLabel := "Backup"
+	if m.wizard.op == wizardOpRestore {
+		opLabel = "Restore"
+	}
+	title := stylePickerTitle.Render(opLabel + "  ▸  " + m.wizard.volumeName)
+
+	var body, hints string
+
+	switch m.wizard.step {
+	case wizardStepInput:
+		if m.wizard.op == wizardOpBackup {
+			body = stylePickerOption.Render("Destination path (.tar.gz):") +
+				"\n\n" + m.wizard.input.View()
+		} else {
+			body = stylePickerOption.Render("Source archive path (.tar.gz):") +
+				"\n\n" + m.wizard.input.View()
+		}
+		hints = stylePickerHint.Render("enter  confirm   esc  cancel")
+
+	case wizardStepTarSummary:
+		body = stylePickerOption.Render("Archive contents:") +
+			"\n\n" + stylePickerOption.Render(m.wizard.tarSummary) +
+			"\n\n" + stylePickerOption.Render("Continue with restore?")
+		hints = stylePickerHint.Render("y/enter  continue   n/esc  cancel")
+
+	case wizardStepRestoreMode:
+		body = stylePickerOption.Render("Restore mode:") +
+			"\n\n" + stylePickerOption.Render("  m  merge   — add to existing volume contents") +
+			"\n" + stylePickerOption.Render("  r  replace — clear volume first, then restore")
+		hints = stylePickerHint.Render("m  merge   r  replace   esc  cancel")
+
+	case wizardStepStopConfirm:
+		var names []string
+		for _, ct := range m.wizard.runningContainers {
+			names = append(names, "  • "+ct.Name)
+		}
+		action := "backup"
+		if m.wizard.op == wizardOpRestore {
+			action = "restore"
+		}
+		body = stylePickerOption.Render("Running containers using this volume:") +
+			"\n\n" + stylePickerOption.Render(strings.Join(names, "\n")) +
+			"\n\n" + stylePickerOption.Render("They will be stopped for the "+action+" and restarted afterwards.")
+		hints = stylePickerHint.Render("y  continue   n/esc  cancel")
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		title,
+		"",
+		body,
+		"",
+		hints,
+	)
+
+	return stylePickerBorder.Render(content)
 }
 
 // overlayCenter composites fg centred over bg using ANSI-aware slicing,

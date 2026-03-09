@@ -3,9 +3,43 @@ package ui
 import (
 	"d4r/internal/docker"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+type wizardOp int
+
+const (
+	wizardOpNone    wizardOp = iota
+	wizardOpBackup
+	wizardOpRestore
+)
+
+type wizardStep int
+
+const (
+	wizardStepInput        wizardStep = iota // text input for path
+	wizardStepTarSummary                     // confirm tar contents (restore only)
+	wizardStepRestoreMode                    // m/r for merge/replace (restore only)
+	wizardStepStopConfirm                    // confirm stopping containers
+)
+
+type volumeWizard struct {
+	op         wizardOp
+	step       wizardStep
+	volumeName string
+
+	input textinput.Model
+
+	destPath    string // backup: destination .tar.gz path
+	sourcePath  string // restore: source .tar.gz path
+	tarSummary  string // restore: listing from tar -tzf
+	replaceMode bool   // restore: true = clear volume first
+
+	runningContainers []docker.Container // containers that need stopping
+	stoppedIDs        []string           // containers stopped (to restart after)
+}
 
 type tab int
 
@@ -65,6 +99,9 @@ type Model struct {
 	themePickerActive  bool
 	themePickerCursor  int
 	currentTheme       string
+
+	// Volume backup/restore wizard
+	wizard volumeWizard
 
 	// Detail / log viewports
 	detailViewport viewport.Model

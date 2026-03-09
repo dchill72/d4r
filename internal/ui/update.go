@@ -2,12 +2,16 @@ package ui
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"d4r/internal/config"
 	"d4r/internal/docker"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -29,6 +33,22 @@ type msgDetailLoaded struct{ content string }
 type msgLogsLoaded struct{ content string }
 type msgLogTick struct{}
 type msgErr struct{ err error }
+
+type msgVolumeContainers struct {
+	containers []docker.Container
+	err        error
+}
+type msgTarSummary struct {
+	summary string
+	err     error
+}
+type msgContainersStopped struct {
+	stoppedIDs []string
+	err        error
+}
+type msgBackupDone struct{ err error }
+type msgRestoreDone struct{ err error }
+type msgContainersRestarted struct{ err error }
 
 // Commands
 
@@ -183,6 +203,86 @@ func logTickCmd() tea.Cmd {
 	})
 }
 
+func fetchContainersForVolume(client *docker.Client, volumeName string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		containers, err := client.GetContainersForVolume(ctx, volumeName)
+		return msgVolumeContainers{containers: containers, err: err}
+	}
+}
+
+func summarizeTarCmd(path string) tea.Cmd {
+	return func() tea.Msg {
+		if _, err := os.Stat(path); err != nil {
+			return msgTarSummary{err: fmt.Errorf("file not found: %s", path)}
+		}
+		out, err := exec.Command("tar", "-tzf", path).Output()
+		if err != nil {
+			return msgTarSummary{err: fmt.Errorf("cannot read archive: %w", err)}
+		}
+		lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+		total := len(lines)
+		shown := lines
+		if total > 30 {
+			shown = lines[:30]
+		}
+		summary := strings.Join(shown, "\n")
+		if total > 30 {
+			summary += fmt.Sprintf("\n... and %d more", total-30)
+		}
+		summary += fmt.Sprintf("\n\nTotal: %d entries", total)
+		return msgTarSummary{summary: summary}
+	}
+}
+
+func doStopContainersCmd(client *docker.Client, containers []docker.Container) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		var stopped []string
+		var lastErr error
+		for _, ct := range containers {
+			if err := client.StopContainer(ctx, ct.FullID); err != nil {
+				lastErr = err
+			} else {
+				stopped = append(stopped, ct.FullID)
+			}
+		}
+		return msgContainersStopped{stoppedIDs: stopped, err: lastErr}
+	}
+}
+
+func doBackupVolumeCmd(client *docker.Client, volumeName, destPath string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		return msgBackupDone{client.BackupVolume(ctx, volumeName, destPath)}
+	}
+}
+
+func doRestoreVolumeCmd(client *docker.Client, volumeName, sourcePath string, replace bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		return msgRestoreDone{client.RestoreVolume(ctx, volumeName, sourcePath, replace)}
+	}
+}
+
+func doStartContainersCmd(client *docker.Client, ids []string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		var lastErr error
+		for _, id := range ids {
+			if err := client.StartContainer(ctx, id); err != nil {
+				lastErr = err
+			}
+		}
+		return msgContainersRestarted{err: lastErr}
+	}
+}
+
 // Update
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -258,8 +358,89 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		return m, nil
 
+	case msgVolumeContainers:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.wizard = volumeWizard{}
+			return m, nil
+		}
+		var running []docker.Container
+		for _, ct := range msg.containers {
+			if ct.State == "running" {
+				running = append(running, ct)
+			}
+		}
+		if len(running) > 0 {
+			m.wizard.runningContainers = running
+			m.wizard.step = wizardStepStopConfirm
+			return m, nil
+		}
+		return m.proceedWithOperation()
+
+	case msgTarSummary:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.wizard = volumeWizard{}
+			return m, nil
+		}
+		m.wizard.tarSummary = msg.summary
+		m.wizard.step = wizardStepTarSummary
+		return m, nil
+
+	case msgContainersStopped:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.wizard = volumeWizard{}
+			return m, nil
+		}
+		m.wizard.stoppedIDs = msg.stoppedIDs
+		return m.proceedWithOperation()
+
+	case msgBackupDone:
+		m.loading = false
+		stoppedIDs := m.wizard.stoppedIDs
+		m.wizard = volumeWizard{}
+		if msg.err != nil {
+			m.err = msg.err
+		}
+		if len(stoppedIDs) > 0 {
+			m.loading = true
+			return m, doStartContainersCmd(m.docker, stoppedIDs)
+		}
+		return m, fetchAll(m.docker, m.showAll)
+
+	case msgRestoreDone:
+		m.loading = false
+		stoppedIDs := m.wizard.stoppedIDs
+		m.wizard = volumeWizard{}
+		if msg.err != nil {
+			m.err = msg.err
+		}
+		if len(stoppedIDs) > 0 {
+			m.loading = true
+			return m, doStartContainersCmd(m.docker, stoppedIDs)
+		}
+		return m, fetchAll(m.docker, m.showAll)
+
+	case msgContainersRestarted:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+		}
+		return m, fetchAll(m.docker, m.showAll)
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	}
+
+	// Forward messages to textinput when wizard is in input mode (e.g. blink ticks).
+	if m.wizard.op != wizardOpNone && m.wizard.step == wizardStepInput {
+		var cmd tea.Cmd
+		m.wizard.input, cmd = m.wizard.input.Update(msg)
+		return m, cmd
 	}
 
 	// Forward viewport messages
@@ -286,6 +467,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Theme picker intercepts all keys while active
 	if m.themePickerActive {
 		return m.handlePickerKey(msg)
+	}
+
+	// Volume wizard intercepts all keys while active
+	if m.wizard.op != wizardOpNone {
+		return m.handleWizardKey(msg)
 	}
 
 	// Confirm dialog
@@ -393,9 +579,23 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	// Refresh
-	case "r":
+	case "f5":
 		m.loading = true
 		return m, fetchAll(m.docker, m.showAll)
+
+	// Volume backup / restore
+	case "b":
+		if m.tab == tabVolumes {
+			if v := m.selectedVolume(); v != nil {
+				return m.startBackupWizard(v.Name)
+			}
+		}
+	case "r":
+		if m.tab == tabVolumes {
+			if v := m.selectedVolume(); v != nil {
+				return m.startRestoreWizard(v.Name)
+			}
+		}
 
 	// Container-specific
 	case "a":
@@ -524,6 +724,117 @@ func saveThemeCmd(theme string) tea.Cmd {
 		_ = config.Save(config.Config{Theme: theme})
 		return nil
 	}
+}
+
+func (m Model) startBackupWizard(volumeName string) (tea.Model, tea.Cmd) {
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.Width = 52
+	ti.SetValue(volumeName + "-" + time.Now().Format("20060102-150405") + ".tar.gz")
+	focusCmd := ti.Focus()
+	m.wizard = volumeWizard{
+		op:         wizardOpBackup,
+		step:       wizardStepInput,
+		volumeName: volumeName,
+		input:      ti,
+	}
+	return m, focusCmd
+}
+
+func (m Model) startRestoreWizard(volumeName string) (tea.Model, tea.Cmd) {
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.Width = 52
+	ti.Placeholder = "path/to/backup.tar.gz"
+	focusCmd := ti.Focus()
+	m.wizard = volumeWizard{
+		op:         wizardOpRestore,
+		step:       wizardStepInput,
+		volumeName: volumeName,
+		input:      ti,
+	}
+	return m, focusCmd
+}
+
+func (m Model) proceedWithOperation() (tea.Model, tea.Cmd) {
+	m.loading = true
+	switch m.wizard.op {
+	case wizardOpBackup:
+		return m, doBackupVolumeCmd(m.docker, m.wizard.volumeName, m.wizard.destPath)
+	case wizardOpRestore:
+		return m, doRestoreVolumeCmd(m.docker, m.wizard.volumeName, m.wizard.sourcePath, m.wizard.replaceMode)
+	}
+	return m, nil
+}
+
+func (m Model) handleWizardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Block input while an async operation is in flight.
+	if m.loading {
+		return m, nil
+	}
+
+	switch m.wizard.step {
+	case wizardStepInput:
+		switch msg.String() {
+		case "esc":
+			m.wizard = volumeWizard{}
+			return m, nil
+		case "enter":
+			path := strings.TrimSpace(m.wizard.input.Value())
+			if path == "" {
+				return m, nil
+			}
+			if m.wizard.op == wizardOpBackup {
+				m.wizard.destPath = path
+				m.loading = true
+				return m, fetchContainersForVolume(m.docker, m.wizard.volumeName)
+			}
+			// Restore: summarise archive first.
+			m.wizard.sourcePath = path
+			m.loading = true
+			return m, summarizeTarCmd(path)
+		default:
+			var cmd tea.Cmd
+			m.wizard.input, cmd = m.wizard.input.Update(msg)
+			return m, cmd
+		}
+
+	case wizardStepTarSummary:
+		switch msg.String() {
+		case "y", "enter":
+			m.wizard.step = wizardStepRestoreMode
+		case "n", "esc":
+			m.wizard = volumeWizard{}
+		}
+		return m, nil
+
+	case wizardStepRestoreMode:
+		switch msg.String() {
+		case "m":
+			m.wizard.replaceMode = false
+			m.loading = true
+			return m, fetchContainersForVolume(m.docker, m.wizard.volumeName)
+		case "r":
+			m.wizard.replaceMode = true
+			m.loading = true
+			return m, fetchContainersForVolume(m.docker, m.wizard.volumeName)
+		case "esc":
+			m.wizard = volumeWizard{}
+		}
+		return m, nil
+
+	case wizardStepStopConfirm:
+		switch msg.String() {
+		case "y", "Y":
+			m.loading = true
+			return m, doStopContainersCmd(m.docker, m.wizard.runningContainers)
+		case "n", "N", "esc":
+			m.wizard = volumeWizard{}
+		}
+		return m, nil
+	}
+
+	return m, nil
 }
 
 func (m Model) shellIntoContainer(id string) (tea.Model, tea.Cmd) {
