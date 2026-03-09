@@ -3,6 +3,7 @@ package ui
 import (
 	"d4r/internal/docker"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -101,7 +102,9 @@ type Model struct {
 	currentTheme       string
 
 	// Volume backup/restore wizard
-	wizard volumeWizard
+	wizard       volumeWizard
+	spinner      spinner.Model
+	spinnerLabel string // non-empty while backup/restore is running
 
 	// Detail / log viewports
 	detailViewport viewport.Model
@@ -114,6 +117,8 @@ type Model struct {
 }
 
 func NewModel(client *docker.Client, theme string) Model {
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
 	return Model{
 		docker:       client,
 		tab:          tabContainers,
@@ -122,6 +127,7 @@ func NewModel(client *docker.Client, theme string) Model {
 		height:       24,
 		currentTheme: theme,
 		showAll:      true,
+		spinner:      sp,
 	}
 }
 

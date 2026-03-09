@@ -169,7 +169,9 @@ func (m Model) renderHeader() string {
 	title := styleTitle.Render("d4r")
 	subtitle := styleVersion.Render(" · Docker TUI")
 	loading := ""
-	if m.loading {
+	if m.spinnerLabel != "" {
+		loading = styleVersion.Render("  " + m.spinner.View() + " " + m.spinnerLabel)
+	} else if m.loading {
 		loading = styleVersion.Render("  loading...")
 	}
 	titleRow := title + subtitle + loading

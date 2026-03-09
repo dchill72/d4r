@@ -6,6 +6,7 @@ import (
 
 	"d4r/internal/docker"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -187,8 +188,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.wizard.stoppedIDs = msg.stoppedIDs
 		return m.proceedWithOperation()
 
+	case spinner.TickMsg:
+		if m.spinnerLabel != "" {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+
 	case msgBackupDone:
 		m.loading = false
+		m.spinnerLabel = ""
 		stoppedIDs := m.wizard.stoppedIDs
 		m.wizard = volumeWizard{}
 		if msg.err != nil {
@@ -202,6 +212,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case msgRestoreDone:
 		m.loading = false
+		m.spinnerLabel = ""
 		stoppedIDs := m.wizard.stoppedIDs
 		m.wizard = volumeWizard{}
 		if msg.err != nil {

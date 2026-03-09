@@ -151,13 +151,21 @@ func (m Model) startRestoreWizard(volumeName string) (tea.Model, tea.Cmd) {
 
 func (m Model) proceedWithOperation() (tea.Model, tea.Cmd) {
 	m.loading = true
+	var opCmd tea.Cmd
 	switch m.wizard.op {
 	case wizardOpBackup:
-		return m, doBackupVolumeCmd(m.docker, m.wizard.volumeName, m.wizard.destPath)
+		m.spinnerLabel = "Backing up " + m.wizard.volumeName + "…"
+		opCmd = doBackupVolumeCmd(m.docker, m.wizard.volumeName, m.wizard.destPath)
 	case wizardOpRestore:
-		return m, doRestoreVolumeCmd(m.docker, m.wizard.volumeName, m.wizard.sourcePath, m.wizard.replaceMode)
+		m.spinnerLabel = "Restoring " + m.wizard.volumeName + "…"
+		opCmd = doRestoreVolumeCmd(m.docker, m.wizard.volumeName, m.wizard.sourcePath, m.wizard.replaceMode)
+	default:
+		return m, nil
 	}
-	return m, nil
+	// Preserve stoppedIDs before clearing the wizard.
+	stoppedIDs := m.wizard.stoppedIDs
+	m.wizard = volumeWizard{stoppedIDs: stoppedIDs}
+	return m, tea.Batch(opCmd, m.spinner.Tick)
 }
 
 func (m Model) handleWizardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
