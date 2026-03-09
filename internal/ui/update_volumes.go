@@ -56,13 +56,14 @@ func summarizeTarCmd(path string) tea.Cmd {
 		}
 		lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
 		total := len(lines)
+		const maxShown = 15
 		shown := lines
-		if total > 30 {
-			shown = lines[:30]
+		if total > maxShown {
+			shown = lines[:maxShown]
 		}
 		summary := strings.Join(shown, "\n")
-		if total > 30 {
-			summary += fmt.Sprintf("\n... and %d more", total-30)
+		if total > maxShown {
+			summary += fmt.Sprintf("\n... and %d more", total-maxShown)
 		}
 		summary += fmt.Sprintf("\n\nTotal: %d entries", total)
 		return msgTarSummary{summary: summary}
