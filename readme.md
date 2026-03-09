@@ -62,11 +62,19 @@ go run .
 curl -fsSL https://raw.githubusercontent.com/dchill72/d4r/main/install.sh | sh
 ```
 
+Or review first, then run locally:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/dchill72/d4r/main/install.sh
+sh install.sh
+```
+
 Optional install variables:
 
 ```sh
-# install a specific version tag
+# install a specific version (accepts v-prefixed tags or plain versions)
 D4R_VERSION=v0.1.0 sh install.sh
+D4R_VERSION=0.1.0 sh install.sh
 
 # install from another repo (forks/private mirrors)
 D4R_REPO=owner/repo sh install.sh
@@ -91,6 +99,8 @@ Tagged pushes like `v0.1.0` trigger the release workflow in `.github/workflows/r
 - `linux/arm64`
 - `darwin/amd64`
 - `darwin/arm64`
+
+Release tags are `vX.Y.Z`, while archive names use `X.Y.Z` (without the `v`). The installer handles this automatically.
 
 ## Usage
 
