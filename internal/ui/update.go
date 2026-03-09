@@ -26,6 +26,7 @@ type msgAllLoaded struct {
 type msgActionDone struct{ err error }
 type msgDetailLoaded struct{ content string }
 type msgLogsLoaded struct{ content string }
+type msgContextLoaded struct{ content string }
 type msgLogTick struct{}
 type msgErr struct{ err error }
 
@@ -49,26 +50,60 @@ type msgContainersRestarted struct{ err error }
 
 func fetchAll(client *docker.Client, all bool) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+		withTimeout := func(fn func(context.Context) error) error {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			return fn(ctx)
+		}
 
-		containers, err := client.ListContainers(ctx, all)
+		var containers []docker.Container
+		err := withTimeout(func(ctx context.Context) error {
+			var listErr error
+			containers, listErr = client.ListContainers(ctx, all)
+			return listErr
+		})
 		if err != nil {
 			return msgErr{err}
 		}
-		volumes, err := client.ListVolumes(ctx)
+
+		var volumes []docker.Volume
+		err = withTimeout(func(ctx context.Context) error {
+			var listErr error
+			volumes, listErr = client.ListVolumes(ctx)
+			return listErr
+		})
 		if err != nil {
 			return msgErr{err}
 		}
-		networks, err := client.ListNetworks(ctx)
+
+		var networks []docker.Network
+		err = withTimeout(func(ctx context.Context) error {
+			var listErr error
+			networks, listErr = client.ListNetworks(ctx)
+			return listErr
+		})
 		if err != nil {
 			return msgErr{err}
 		}
-		images, err := client.ListImages(ctx)
+
+		var images []docker.Image
+		err = withTimeout(func(ctx context.Context) error {
+			var listErr error
+			images, listErr = client.ListImages(ctx)
+			return listErr
+		})
 		if err != nil {
 			return msgErr{err}
 		}
 		return msgAllLoaded{containers, volumes, networks, images}
+	}
+}
+
+func fetchContextInfo(client *docker.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return msgContextLoaded{content: client.ContextReport(ctx)}
 	}
 }
 
@@ -87,6 +122,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.screen == screenLogs {
 			m.logViewport.Width = vp.Width
 			m.logViewport.Height = vp.Height
+		} else if m.contextModalActive {
+			w, h := contextModalSize(m.width, m.height)
+			m.contextViewport.Width = w
+			m.contextViewport.Height = h
 		}
 		return m, nil
 
@@ -131,6 +170,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = logTickCmd()
 		}
 		return m, cmd
+
+	case msgContextLoaded:
+		m.loading = false
+		w, h := contextModalSize(m.width, m.height)
+		m.contextViewport = viewport.New(w, h)
+		m.contextViewport.SetContent(msg.content)
+		m.contextModalActive = true
+		return m, nil
 
 	case msgLogTick:
 		if m.screen != screenLogs || !m.following {
@@ -264,6 +311,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.themePickerActive {
 		return m.handlePickerKey(msg)
+	}
+
+	if m.contextModalActive {
+		return m.handleContextKey(msg)
 	}
 
 	if m.wizard.op != wizardOpNone {
@@ -415,6 +466,9 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.themePickerActive = true
 		m.themePickerCursor = ThemeIndex(m.currentTheme)
 		return m, nil
+	case "c":
+		m.loading = true
+		return m, fetchContextInfo(m.docker)
 
 	case "D":
 		switch m.tab {
@@ -481,4 +535,18 @@ func (m *Model) clampSelected() {
 	m.volumeSelected = clamp(m.volumeSelected, len(m.volumes))
 	m.networkSelected = clamp(m.networkSelected, len(m.networks))
 	m.imageSelected = clamp(m.imageSelected, len(m.images))
+}
+
+func (m Model) handleContextKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "esc":
+		m.contextModalActive = false
+		return m, nil
+	case "c", "f5":
+		m.loading = true
+		return m, fetchContextInfo(m.docker)
+	}
+	var cmd tea.Cmd
+	m.contextViewport, cmd = m.contextViewport.Update(msg)
+	return m, cmd
 }

@@ -94,6 +94,7 @@ Available theme values: `charm`, `dracula`, `tokyo-night`, `base16`, `catppuccin
 | `1` `2` `3` `4` | Jump to Containers / Volumes / Networks / Images |
 | `j` / `k` / `↑` / `↓` | Navigate list |
 | `F5` | Refresh |
+| `c` | Open Docker context modal |
 | `t` | Open theme picker |
 | `q` / `Ctrl+C` | Quit |
 

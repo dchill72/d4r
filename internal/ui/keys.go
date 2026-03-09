@@ -3,6 +3,14 @@ package ui
 // footerHints returns context-appropriate key hints for the footer.
 // Each entry is a [key, description] pair.
 func (m Model) footerHints() [][2]string {
+	if m.contextModalActive {
+		return [][2]string{
+			{"↑↓/j/k", "scroll"},
+			{"c/F5", "refresh"},
+			{"esc/q", "close"},
+		}
+	}
+
 	if m.confirm.active {
 		return [][2]string{
 			{"y", "confirm"},
@@ -37,6 +45,7 @@ func (m Model) footerHints() [][2]string {
 		{"F5", "refresh"},
 	}
 	tail := [][2]string{
+		{"c", "context"},
 		{"t", "theme"},
 		{"q", "quit"},
 	}
