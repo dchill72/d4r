@@ -50,6 +50,23 @@ download() {
   fi
 }
 
+download_release_asset() {
+  file="$1"
+  out="$2"
+
+  if download "$base_url/$file" "$out"; then
+    return 0
+  fi
+  if [ -n "${base_url_fallback:-}" ]; then
+    if download "$base_url_fallback/$file" "$out"; then
+      return 0
+    fi
+  fi
+
+  echo "error: could not download $file from release tag $release_tag" >&2
+  exit 1
+}
+
 resolve_version() {
   if [ "$VERSION" != "latest" ]; then
     echo "$VERSION"
@@ -112,10 +129,17 @@ main() {
 
   os="$(detect_os)"
   arch="$(detect_arch)"
-  version="$(resolve_version)"
+  release_tag="$(resolve_version)"
+  archive_version="${release_tag#v}"
 
-  base_url="https://github.com/$REPO/releases/download/$version"
-  archive="${BIN_NAME}_${version}_${os}_${arch}.tar.gz"
+  base_url="https://github.com/$REPO/releases/download/$release_tag"
+  base_url_fallback=""
+  case "$release_tag" in
+    v*) ;;
+    *) base_url_fallback="https://github.com/$REPO/releases/download/v$release_tag" ;;
+  esac
+
+  archive="${BIN_NAME}_${archive_version}_${os}_${arch}.tar.gz"
   checksums="checksums.txt"
 
   tmp_dir="$(mktemp -d)"
@@ -125,10 +149,10 @@ main() {
   checksums_path="$tmp_dir/$checksums"
 
   echo "Downloading $archive..."
-  download "$base_url/$archive" "$archive_path"
+  download_release_asset "$archive" "$archive_path"
 
   echo "Downloading $checksums..."
-  download "$base_url/$checksums" "$checksums_path"
+  download_release_asset "$checksums" "$checksums_path"
 
   echo "Verifying checksum..."
   verify_checksum "$archive_path" "$checksums_path"
@@ -144,7 +168,7 @@ main() {
   echo "Installing to $INSTALL_DIR..."
   install_binary "$tmp_dir/$BIN_NAME" "$INSTALL_DIR"
 
-  echo "Installed $BIN_NAME $version to $INSTALL_DIR/$BIN_NAME"
+  echo "Installed $BIN_NAME $release_tag to $INSTALL_DIR/$BIN_NAME"
   echo "Run: $BIN_NAME"
 }
 
