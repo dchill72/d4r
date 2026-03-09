@@ -101,6 +101,10 @@ type Model struct {
 	themePickerCursor  int
 	currentTheme       string
 
+	// Docker context modal
+	contextModalActive bool
+	contextViewport    viewport.Model
+
 	// Volume backup/restore wizard
 	wizard       volumeWizard
 	spinner      spinner.Model

@@ -2,10 +2,12 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -20,14 +22,44 @@ import (
 )
 
 type Client struct {
-	cli *dockerclient.Client
+	cli           *dockerclient.Client
+	selectedHost  string
+	hostSource    string
+	contextName   string
+	contextSource string
 }
 
 func NewClient() (*Client, error) {
-	cli, err := dockerclient.NewClientWithOpts(
+	selectedHost := strings.TrimSpace(os.Getenv("DOCKER_HOST"))
+	hostSource := ""
+	if selectedHost != "" {
+		hostSource = "DOCKER_HOST env"
+	}
+	contextName, contextSource := currentContextName()
+
+	opts := []dockerclient.Opt{
 		dockerclient.FromEnv,
 		dockerclient.WithAPIVersionNegotiation(),
-	)
+	}
+	if os.Getenv("DOCKER_HOST") == "" {
+		if ctxName, host, ok := resolveDockerHostFromContext(); ok {
+			opts = append(opts, dockerclient.WithHost(host))
+			selectedHost = host
+			hostSource = "docker context"
+			if ctxName != "" {
+				contextName = ctxName
+			}
+		} else if runtime.GOOS == "darwin" {
+			desktopSock := filepath.Join(homeDir(), ".docker", "run", "docker.sock")
+			if _, err := os.Stat(desktopSock); err == nil {
+				opts = append(opts, dockerclient.WithHost("unix://"+desktopSock))
+				selectedHost = "unix://" + desktopSock
+				hostSource = "darwin fallback"
+			}
+		}
+	}
+
+	cli, err := dockerclient.NewClientWithOpts(opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +71,123 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("cannot connect to Docker daemon: %w", err)
 	}
 
-	return &Client{cli: cli}, nil
+	if selectedHost == "" {
+		selectedHost = cli.DaemonHost()
+	}
+	if hostSource == "" {
+		hostSource = "docker sdk default"
+	}
+
+	return &Client{
+		cli:           cli,
+		selectedHost:  selectedHost,
+		hostSource:    hostSource,
+		contextName:   contextName,
+		contextSource: contextSource,
+	}, nil
+}
+
+type dockerContextMeta struct {
+	Name      string `json:"Name"`
+	Endpoints struct {
+		Docker struct {
+			Host string `json:"Host"`
+		} `json:"docker"`
+	} `json:"Endpoints"`
+}
+
+type dockerConfig struct {
+	CurrentContext string `json:"currentContext"`
+}
+
+func resolveDockerHostFromContext() (string, string, bool) {
+	ctxName, _ := currentContextName()
+	if ctxName == "" || ctxName == "default" {
+		return "", "", false
+	}
+
+	metaRoot := filepath.Join(homeDir(), ".docker", "contexts", "meta")
+	entries, err := os.ReadDir(metaRoot)
+	if err != nil {
+		return "", "", false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		metaPath := filepath.Join(metaRoot, entry.Name(), "meta.json")
+		b, err := os.ReadFile(metaPath)
+		if err != nil {
+			continue
+		}
+		var meta dockerContextMeta
+		if err := json.Unmarshal(b, &meta); err != nil {
+			continue
+		}
+		if meta.Name == ctxName && meta.Endpoints.Docker.Host != "" {
+			return ctxName, strings.TrimSpace(meta.Endpoints.Docker.Host), true
+		}
+	}
+	return "", "", false
+}
+
+func homeDir() string {
+	if h, err := os.UserHomeDir(); err == nil {
+		return h
+	}
+	return ""
+}
+
+func currentContextName() (string, string) {
+	if ctx := strings.TrimSpace(os.Getenv("DOCKER_CONTEXT")); ctx != "" {
+		return ctx, "DOCKER_CONTEXT env"
+	}
+	cfgPath := filepath.Join(homeDir(), ".docker", "config.json")
+	b, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return "", "none"
+	}
+	var cfg dockerConfig
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		return "", "none"
+	}
+	ctx := strings.TrimSpace(cfg.CurrentContext)
+	if ctx == "" {
+		return "", "none"
+	}
+	return ctx, "~/.docker/config.json"
+}
+
+func (c *Client) ContextReport(ctx context.Context) string {
+	var sb strings.Builder
+	sb.WriteString("Docker Connection Context\n\n")
+	sb.WriteString(fmt.Sprintf("Selected host:   %s\n", c.selectedHost))
+	sb.WriteString(fmt.Sprintf("Host source:     %s\n", c.hostSource))
+	sb.WriteString(fmt.Sprintf("Context name:    %s\n", fallback(c.contextName, "<none>")))
+	sb.WriteString(fmt.Sprintf("Context source:  %s\n", fallback(c.contextSource, "<none>")))
+	sb.WriteString(fmt.Sprintf("DOCKER_HOST:     %s\n", fallback(strings.TrimSpace(os.Getenv("DOCKER_HOST")), "<unset>")))
+	sb.WriteString(fmt.Sprintf("DOCKER_CONTEXT:  %s\n", fallback(strings.TrimSpace(os.Getenv("DOCKER_CONTEXT")), "<unset>")))
+	sb.WriteString(fmt.Sprintf("DOCKER_TLS_VERIFY: %s\n", fallback(strings.TrimSpace(os.Getenv("DOCKER_TLS_VERIFY")), "<unset>")))
+	sb.WriteString(fmt.Sprintf("DOCKER_CERT_PATH:  %s\n", fallback(strings.TrimSpace(os.Getenv("DOCKER_CERT_PATH")), "<unset>")))
+
+	ping, err := c.cli.Ping(ctx)
+	if err != nil {
+		sb.WriteString(fmt.Sprintf("\nPing:            error: %v\n", err))
+		return sb.String()
+	}
+	sb.WriteString("\nDaemon Ping\n\n")
+	sb.WriteString(fmt.Sprintf("API version:     %s\n", fallback(ping.APIVersion, "<unknown>")))
+	sb.WriteString(fmt.Sprintf("OS type:         %s\n", fallback(ping.OSType, "<unknown>")))
+	sb.WriteString(fmt.Sprintf("Builder version: %s\n", fallback(string(ping.BuilderVersion), "<unknown>")))
+	sb.WriteString(fmt.Sprintf("Experimental:    %v\n", ping.Experimental))
+	return sb.String()
+}
+
+func fallback(v, d string) string {
+	if strings.TrimSpace(v) == "" {
+		return d
+	}
+	return v
 }
 
 func (c *Client) Close() {

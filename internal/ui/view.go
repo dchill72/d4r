@@ -21,6 +21,10 @@ func (m Model) View() string {
 		return overlayCenter(base, m.renderThemePicker(), m.width, m.height)
 	}
 
+	if m.contextModalActive {
+		return overlayCenter(base, m.renderContextModal(), m.width, m.height)
+	}
+
 	if m.wizard.op != wizardOpNone {
 		return overlayCenter(base, m.renderVolumeWizard(), m.width, m.height)
 	}
@@ -159,6 +163,23 @@ func (m Model) renderThemePicker() string {
 		hints,
 	)
 
+	return stylePickerBorder.Render(content)
+}
+
+func contextModalSize(totalW, totalH int) (int, int) {
+	w := max(60, totalW-10)
+	h := max(10, totalH-8)
+	if w > 120 {
+		w = 120
+	}
+	return w, h
+}
+
+func (m Model) renderContextModal() string {
+	title := stylePickerTitle.Render("Docker Context")
+	body := m.contextViewport.View()
+	hints := stylePickerHint.Render("↑↓/j/k scroll   c/F5 refresh   esc/q close")
+	content := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", hints)
 	return stylePickerBorder.Render(content)
 }
 
