@@ -56,11 +56,41 @@ go run .
 
 ## Install
 
+### Prebuilt binary (recommended)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dchill72/d4r/main/install.sh | sh
+```
+
+Optional install variables:
+
+```sh
+# install a specific version tag
+D4R_VERSION=v0.1.0 sh install.sh
+
+# install from another repo (forks/private mirrors)
+D4R_REPO=owner/repo sh install.sh
+
+# install to a custom path
+INSTALL_DIR="$HOME/.local/bin" sh install.sh
+```
+
+### Build from source
+
 ```sh
 go install .
 ```
 
-This places `d4r` on your `$GOPATH/bin` (ensure it is in `$PATH`).
+This places `d4r` in your `$GOPATH/bin` (ensure it is in `$PATH`).
+
+## Releases
+
+Tagged pushes like `v0.1.0` trigger the release workflow in `.github/workflows/release.yml`, which uses GoReleaser to publish checksummed tarballs for:
+
+- `linux/amd64`
+- `linux/arm64`
+- `darwin/amd64`
+- `darwin/arm64`
 
 ## Usage
 
